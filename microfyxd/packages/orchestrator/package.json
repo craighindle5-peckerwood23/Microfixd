@@ -1,0 +1,7 @@
+{
+  "name": "@microfyxd/orchestrator",
+  "version": "1.0.0",
+  "main": "sandboxOrchestrator.ts",
+  "dependencies": {},
+  "private": true
+}
