@@ -1,0 +1,15 @@
+{
+  "name": "@microfyxd/runtime-server",
+  "version": "1.0.0",
+  "main": "server.ts",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "@microfyxd/core": "1.0.0",
+    "@microfyxd/agent": "1.0.0"
+  },
+  "private": true
+}

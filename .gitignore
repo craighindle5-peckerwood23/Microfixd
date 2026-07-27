@@ -1,0 +1,17 @@
+# Local environment and secret configurations (Protecting API Keys & credentials)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*
+!.env.example
+
+# Build, dependency, and log files
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+

@@ -1,0 +1,23 @@
+{
+  "name": "microfyxd-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Enterprise AI System Multi-Agent Monorepo with LangGraph execution surface",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

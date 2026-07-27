@@ -1,0 +1,20 @@
+{
+  "name": "@microfyxd/agent",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@microfyxd/core": "1.0.0",
+    "@microfyxd/shared": "1.0.0",
+    "@microfyxd/watchdog": "1.0.0",
+    "@microfyxd/phenotype": "1.0.0",
+    "@microfyxd/infra": "1.0.0",
+    "@microfyxd/memory": "1.0.0",
+    "@microfyxd/doctrine": "1.0.0",
+    "@microfyxd/sandbox": "1.0.0"
+  },
+  "private": true
+}

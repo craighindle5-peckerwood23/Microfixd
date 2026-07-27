@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account registration metadata.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The Firebase Authentication unique identifier."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User primary contact email."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the user account was initialized."
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Favorite": {
+      "title": "User Favorite Item",
+      "description": "A saved email thread, file metadata, or system resource marked as favorite.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique record identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who saved this item."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["email", "file", "system"],
+          "description": "Type of resource favorited."
+        },
+        "externalId": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Resource identifier in external service."
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512,
+          "description": "The title or display name of the resource."
+        },
+        "snippet": {
+          "type": "string",
+          "maxLength": 2048,
+          "description": "A snippet or text preview of the resource."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when favorited."
+        }
+      },
+      "required": ["userId", "type", "externalId", "title", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "System Audit Log Entry",
+      "description": "High-assurance log recording security-critical user actions and GPU operations.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique log entry identifier."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who performed the action."
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The action performed (e.g., GPU_VRAM_REROUTE, SEND_EMAIL)."
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 4096,
+          "description": "Diagnostic or descriptive metadata for the action."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when action occurred."
+        }
+      },
+      "required": ["userId", "action", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Root collection containing individual user registry profiles."
+    },
+    "users/{userId}/favorites/{favoriteId}": {
+      "schema": "Favorite",
+      "description": "Subcollection of favorited external and internal resources."
+    },
+    "users/{userId}/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Subcollection tracking immutable user activity and control plane events."
+    }
+  }
+}
