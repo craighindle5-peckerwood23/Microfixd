@@ -11,6 +11,7 @@ import { db } from './src/db/index.ts';
 import { favorites, auditLogs, users } from './src/db/schema.ts';
 import { eq, and, desc } from 'drizzle-orm';
 
+import { mountRoutes } from './microfyxd/apps/runtime/routes/index.ts';
 // Relative imports from our monorepo packages in the workspace
 import { createInitialState, MicrofyxdState } from './microfyxd/packages/core/index.ts';
 import { buildProductionGraph } from './microfyxd/packages/agent/index.ts';
@@ -507,6 +508,9 @@ Generate a markdown response:
     const result = SandboxService.lintAndVerify(code || '');
     res.json({ result });
   });
+
+  // --- Microfyxd Builder API Routes ---
+  mountRoutes(app);
 
   // Vite development middleware vs Static serving
   if (process.env.NODE_ENV !== 'production') {
