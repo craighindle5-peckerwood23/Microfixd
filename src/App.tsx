@@ -48,6 +48,10 @@ import {
   fetchAuditLogsFromFirestore
 } from './lib/firebase.ts';
 import { User } from 'firebase/auth';
+import { Preview } from '../microfyxd/apps/ui/components/Preview';
+import { ChatBox } from '../microfyxd/apps/ui/components/ChatBox';
+import { ImportButton } from '../microfyxd/apps/ui/components/ImportButton';
+import { ExportButton } from '../microfyxd/apps/ui/components/ExportButton';
 
 interface TraceLog {
   stepId: string;
@@ -2030,6 +2034,23 @@ Microfyxd is an advanced, high-assurance multi-agent platform orchestrated stric
                       </div>
 
                       <div className="mt-2 bg-[#0d151c] border border-sky-900/30 rounded-lg p-3 text-[11px] text-sky-200 leading-relaxed">
+
+                  {/* MICROFYXD BUILDER: Chat → Generate → Preview */}
+                  <div className="border-t border-gray-800 pt-5 mt-2">
+                    <h4 className="text-xs font-mono font-bold text-white uppercase mb-3">Microfyxd App Builder</h4>
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                      <div className="lg:col-span-5 bg-[#05060a] border border-gray-850 rounded-xl overflow-hidden" style={{ height: '500px' }}>
+                        <ChatBox />
+                      </div>
+                      <div className="lg:col-span-7" style={{ height: '500px' }}>
+                        <Preview />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 mt-3">
+                      <ImportButton />
+                      <ExportButton />
+                    </div>
+                  </div>
                         💡 **Try it**: Click **TRIGGER AUTO-REPAIR**. The LangGraph will automatically locate the missing '=' in 'const bugVar', append the closing curly bracket to 'processECU()', and verify execution!
                       </div>
                     </div>
