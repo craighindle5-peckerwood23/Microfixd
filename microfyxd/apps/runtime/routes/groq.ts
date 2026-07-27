@@ -2,14 +2,15 @@
  * /api/groq — accepts and stores a Groq API key in memory.
  * POST { "apiKey": "gsk_..." } → { success: true }
  * GET → { hasKey: boolean }
+ * Falls back to process.env.GROQ_API_KEY on startup.
  */
 
 import { Router } from 'express';
 
 export const groqRouter = Router();
 
-// In-memory key store (process-scoped, not persisted)
-let storedKey: string | null = null;
+// In-memory key store — initialized from env var if present
+let storedKey: string | null = process.env.GROQ_API_KEY ?? null;
 
 groqRouter.post('/api/groq', (req, res) => {
   const { apiKey } = req.body;
@@ -25,5 +26,5 @@ groqRouter.get('/api/groq', (_req, res) => {
 });
 
 export function getGroqKey(): string | null {
-  return storedKey;
+  return storedKey ?? process.env.GROQ_API_KEY ?? null;
 }
