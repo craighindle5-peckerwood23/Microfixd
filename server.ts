@@ -1,3 +1,4 @@
+import dotenv from "dotenv"; dotenv.config({ path: ".env.local" });
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
