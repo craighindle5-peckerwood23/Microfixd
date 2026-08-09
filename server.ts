@@ -1,4 +1,8 @@
-import dotenv from "dotenv"; dotenv.config({ path: ".env.local" });
+import dotenv from "dotenv";
+
+dotenv.config({ path: ".env.local" });
+dotenv.config();
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -14,7 +18,7 @@ import { eq, and, desc } from 'drizzle-orm';
 
 import { mountRoutes } from './microfyxd/apps/runtime/routes/index.ts';
 // Relative imports from our monorepo packages in the workspace
-import { createInitialState, MicrofyxdState } from './microfyxd/packages/core/index.ts';
+import { createInitialState } from './microfyxd/packages/core/index.ts';
 import { buildProductionGraph } from './microfyxd/packages/agent/index.ts';
 import { SandboxService } from './microfyxd/packages/sandbox/index.ts';
 import { PhenotypeEngine } from './microfyxd/packages/phenotype/index.ts';
@@ -22,7 +26,7 @@ import { PhenotypeEngine } from './microfyxd/packages/phenotype/index.ts';
 async function startServer() {
   const app = express();
   app.use(express.json());
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
 
   // API Route: Sync user in database
   app.post('/api/users/sync', requireAuth, async (req: AuthRequest, res) => {
@@ -162,7 +166,6 @@ async function startServer() {
         return res.status(404).json({ success: false, error: 'User not synchronized.' });
       }
 
-      // Fetch message list
       const listRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=10', {
         headers: { 'Authorization': `Bearer ${googleToken}` }
       });
@@ -177,7 +180,6 @@ async function startServer() {
       const emails = [];
 
       if (listData.messages && listData.messages.length > 0) {
-        // Fetch details of each message (limit to parallel fetch for speed)
         const detailPromises = listData.messages.map(async (msg) => {
           const detailRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`, {
             headers: { 'Authorization': `Bearer ${googleToken}` }
@@ -198,7 +200,6 @@ async function startServer() {
         emails.push(...resolved.filter((e) => e !== null));
       }
 
-      // Log action to database
       await db.insert(auditLogs).values({
         userId: dbUser[0].id,
         action: 'FETCH_GMAIL_EMAILS',
@@ -262,7 +263,6 @@ async function startServer() {
 
       const sendData = await sendRes.json();
 
-      // Log action to database
       await db.insert(auditLogs).values({
         userId: dbUser[0].id,
         action: 'SEND_GMAIL_EMAIL',
@@ -303,7 +303,6 @@ async function startServer() {
       const driveData = (await driveRes.json()) as { files?: any[] };
       const files = driveData.files || [];
 
-      // Log action to database
       await db.insert(auditLogs).values({
         userId: dbUser[0].id,
         action: 'FETCH_DRIVE_FILES',
@@ -355,7 +354,6 @@ async function startServer() {
 
       const createData = await createRes.json();
 
-      // Log action to database
       await db.insert(auditLogs).values({
         userId: dbUser[0].id,
         action: 'CREATE_DRIVE_FOLDER',
@@ -369,7 +367,6 @@ async function startServer() {
     }
   });
 
-  // Initialize Gemini Client server-side
   let ai: GoogleGenAI | null = null;
   if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({
@@ -382,27 +379,24 @@ async function startServer() {
     });
   }
 
-  // API Route: Run LangGraph multi-agent flow
   app.post('/api/run', async (req, res) => {
     const { prompt, sourceCode, hardwareOverride, arcanaTier } = req.body;
 
     try {
-      // 1. Initialize State
       let state = createInitialState(prompt);
 
-      // 2. Inject parameters
       if (sourceCode) {
         state.sandbox.sourceCode = sourceCode;
       } else {
         const lowercasePrompt = (prompt || '').toLowerCase();
-        const isSandboxQuery = 
-          lowercasePrompt.includes('sandbox') || 
-          lowercasePrompt.includes('repair') || 
-          lowercasePrompt.includes('diagnose') || 
-          lowercasePrompt.includes('compile') || 
-          lowercasePrompt.includes('heal') || 
-          lowercasePrompt.includes('code') || 
-          lowercasePrompt.includes('snippet') || 
+        const isSandboxQuery =
+          lowercasePrompt.includes('sandbox') ||
+          lowercasePrompt.includes('repair') ||
+          lowercasePrompt.includes('diagnose') ||
+          lowercasePrompt.includes('compile') ||
+          lowercasePrompt.includes('heal') ||
+          lowercasePrompt.includes('code') ||
+          lowercasePrompt.includes('snippet') ||
           lowercasePrompt.includes('syntax');
         if (isSandboxQuery) {
           state.sandbox.sourceCode = `// Microfyxd Code Workspace - Syntax Error Diagnostic\nimport { someHelper }\n\nconst bugVar\n\nfunction processECU() {\n  console.log("Reading ECU Telemetry...")\n  // Unclosed brackets below will trigger sandbox compilation failure\n  if (bugVar === undefined) {\n    return "unresolved"`;
@@ -416,13 +410,9 @@ async function startServer() {
         state.doctrine.currentArcanaTier = Number(arcanaTier);
       }
 
-      // 3. Build Compiled LangGraph
       const graph = buildProductionGraph();
+      const finalState = await graph.run(state);
 
-      // 4. Run through the graph
-      let finalState = await graph.run(state);
-
-      // 5. Enrich with real Gemini intelligence if API key is present
       if (ai) {
         try {
           const geminiPrompt = `
@@ -445,14 +435,12 @@ Generate a markdown response:
           });
 
           if (response.text) {
-            // Replace the final message content with the rich AI output
             if (finalState.messages.length > 0 && finalState.messages[finalState.messages.length - 1].role === 'assistant') {
               finalState.messages[finalState.messages.length - 1].content = response.text;
             }
           }
         } catch (geminiError) {
           console.error('[GEMINI ENRICHMENT ERROR]', geminiError);
-          // Fall back to pre-defined responses in the nodes
         }
       }
 
@@ -469,8 +457,7 @@ Generate a markdown response:
     }
   });
 
-  // API Route: Get files from monorepo for file browser
-  app.get('/api/files', (req, res) => {
+  app.get('/api/files', (_req, res) => {
     const filePaths = [
       { path: 'microfyxd/package.json', label: 'Root config' },
       { path: 'microfyxd/packages/core/index.ts', label: '@microfyxd/core' },
@@ -490,7 +477,7 @@ Generate a markdown response:
       let content = '';
       try {
         content = fs.readFileSync(fullPath, 'utf8');
-      } catch (e) {
+      } catch {
         content = `Error reading file ${f.path}`;
       }
       return {
@@ -503,17 +490,14 @@ Generate a markdown response:
     res.json({ files });
   });
 
-  // API Route: Sandbox syntax lint evaluation
   app.post('/api/sandbox/eval', (req, res) => {
     const { code } = req.body;
     const result = SandboxService.lintAndVerify(code || '');
     res.json({ result });
   });
 
-  // --- Microfyxd Builder API Routes ---
   mountRoutes(app);
 
-  // Vite development middleware vs Static serving
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -523,14 +507,17 @@ Generate a markdown response:
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[MICROFYXD INGRESS] Server running on http://localhost:${PORT}`);
+    console.log(`[MICROFYXD INGRESS] Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+startServer().catch((error) => {
+  console.error('[SERVER START ERROR]', error);
+  process.exit(1);
+});
