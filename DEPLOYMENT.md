@@ -14,6 +14,8 @@ Microfixd ships as one Docker image and one Node entrypoint: `node dist/server.c
 | `MICROFIXD_EMERGENCY_STOP` | Immediately blocks mutating autonomous work while preserving non-mutating inspection. | Default `false`; set `true` during incident response. |
 | `MICROFIXD_PLUGINS_JSON` | Defines allowlisted plugin manifests without credential values. | Optional. Credential references point to separately stored server variables. |
 | `MICROFIXD_ENABLE_LOCAL_SCREENSHOTS` | Enables Puppeteer capture of Microfixd’s own local console. | Default `false`. Set `true` only in a trusted environment; non-local browser navigation is blocked. |
+| `MICROFIXD_DEFAULT_TENANT` | Default tenant for internal compatibility paths. | Keep `global`; all customer work should submit an explicit tenant identifier. |
+| `NVIDIA_VISIBLE_DEVICES` | Optional platform-provided GPU discovery signal. | Read-only discovery only; it does not enable GPU workload execution or billing. |
 
 ## Railway
 
@@ -49,16 +51,22 @@ Build the same Docker image on either platform; no code, manifest, or runtime br
 Export only local development values in the terminal environment, then use the supplied Compose profile:
 
 ```bash
-export ADMIN_API_KEY='development-only-value'
+export ADMIN_API_KEY='<set-a-local-secret-in-your-shell>'
 export REQUIRE_DURABLE_MEMORY=false
 docker compose up --build
 ```
 
 Check `http://localhost:3000/healthz` for process liveness and `http://localhost:3000/readyz` for storage readiness. Do not treat local JSON mode as a production deployment.
 
+## Level-6 Operational Boundaries
+
+Microfixd exposes a 200-organ, eight-layer mission-control interface after the service is running. Its protected operations routes require both `ADMIN_API_KEY` and a valid `x-microfixd-tenant` header (or an explicit `tenantId` in the request). The global tenant exists for internal compatibility and does not weaken the Tier-0 constitution. Safe mode can be changed only through the protected operator API; it preserves inspection and evidence while halting non-inspection work.
+
+Compute discovery is local and read-only. GPU/eGPU offload, distributed compute, clusters, web automation, browser use, GitHub, CI/CD, deployment, and external vehicle/device control are not enabled by a container variable or UI control. Each requires an approved Plugin Registry manifest, OmniRouter route, Paragon decision, cost/risk policy, and—when protected—Craig’s explicit approval. GitHub workflow support creates an audited change request; it does not create a PR, merge code, deploy, or roll back production by itself.
+
 ## Supabase Schema
 
-The active `microfyxd` project contains the additive `microfixd_*` tables created by `supabase/migrations/20260820_microfixd_governed_system.sql`. These tables retain the 150-organ registry, organ invocations, governed runs and steps, decisions, approvals, memory and learning records, integration audits, phenotype snapshots, and system events. RLS is enabled and browser roles receive no direct policies.
+The active `microfyxd` project contains the additive `microfixd_*` tables created by both `supabase/migrations/20260820_microfixd_governed_system.sql` and `supabase/migrations/20260820_microfixd_level6_extension.sql`. The system-of-record now includes the versioned 200-organ registry, Layer-0 through Layer-7 inventory, tenant-scoped runs, agent roles and handoffs, sandbox repair proposals, compute posture, change requests, safe mode, organ invocations, governed steps and decisions, approvals, memory and learning records, integration audits, phenotype snapshots, and system events. RLS is enabled and browser roles receive no direct policies.
 
 ## References
 

@@ -8,6 +8,7 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 export interface GoalInput {
   goal: string;
   agentId?: string;
+  tenantId?: string;
   requestedBy?: string;
   metadata?: Record<string, unknown>;
 }
@@ -22,6 +23,7 @@ export interface PlannedAction {
 
 export interface RunRecord {
   id: string;
+  tenantId: string;
   agentId: string;
   goal: string;
   requestedBy: string;
@@ -54,6 +56,7 @@ export interface StepRecord {
 
 export interface MemoryRecord {
   id: string;
+  tenantId: string;
   agentId: string;
   runId?: string;
   kind: MemoryKind;
@@ -111,10 +114,13 @@ export interface OrganRegistryRecord {
   name: string;
   family: string;
   familyNumber: number;
+  layer: number;
+  version: string;
   tier: 'tier-0' | 'tier-1' | 'tier-2';
   mode: 'native' | 'composed' | 'adapter';
   guidedPath: string;
   finalAuthority: 'Paragon Dissector';
+  metadata: Record<string, unknown>;
 }
 
 export interface OrganInvocationRecord {
@@ -146,6 +152,19 @@ export interface SystemEventRecord {
   createdAt: string;
 }
 
+export type Level6RecordType = 'tenant' | 'agent' | 'agent_execution' | 'repair_proposal' | 'compute_profile' | 'change_request' | 'safe_mode' | 'workflow_template' | 'organ_boot' | 'organ_health' | 'organ_wiring' | 'cognitive_map' | 'cognitive_assessment' | 'memory_assessment' | 'execution_assessment' | 'evolution_assessment' | 'infrastructure_assessment' | 'health_assessment' | 'audit_assessment' | 'governance_lock';
+
+export interface Level6Record {
+  id: string;
+  type: Level6RecordType;
+  tenantId: string;
+  name: string;
+  status: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface HealthSnapshot {
   status: 'ok' | 'degraded' | 'failed';
   service: string;
@@ -173,7 +192,7 @@ export interface RuntimeStore {
   updateStep(id: string, patch: Partial<StepRecord>): Promise<StepRecord | undefined>;
   listSteps(runId: string): Promise<StepRecord[]>;
   appendMemory(memory: MemoryRecord): Promise<void>;
-  recallMemory(agentId: string, query: string, limit: number): Promise<MemoryRecord[]>;
+  recallMemory(agentId: string, query: string, limit: number, tenantId: string): Promise<MemoryRecord[]>;
   savePolicyDecision(decision: PolicyDecision): Promise<void>;
   createApproval(approval: ApprovalRequest): Promise<void>;
   getApproval(id: string): Promise<ApprovalRequest | undefined>;
@@ -185,6 +204,8 @@ export interface RuntimeStore {
   appendOrganInvocation(invocation: OrganInvocationRecord): Promise<void>;
   appendPhenotype(snapshot: PhenotypeRecord): Promise<void>;
   appendSystemEvent(event: SystemEventRecord): Promise<void>;
+  upsertLevel6Record(record: Level6Record): Promise<void>;
+  listLevel6Records(type: Level6RecordType, tenantId?: string): Promise<Level6Record[]>;
 }
 
 export interface TelemetryEvent {

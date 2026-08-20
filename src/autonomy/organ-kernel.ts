@@ -8,6 +8,7 @@ export type OrganInvocation = {
   organId: string;
   operation: 'status' | 'describe' | 'prepare';
   runId?: string;
+  tenantId?: string;
   payload?: Record<string, unknown>;
   requestedBy?: string;
 };
@@ -28,10 +29,11 @@ export class OrganKernel {
     const now = new Date().toISOString();
     let run: RunRecord = {
       id: invocation.runId || `organ-${randomUUID()}`,
+      tenantId: invocation.tenantId || 'global',
       agentId: `organ:${organ.id}`,
       goal: `Invoke ${organ.name} ${invocation.operation}`,
       requestedBy: invocation.requestedBy || 'Craig',
-      metadata: { organId: organ.id },
+      metadata: { organId: organ.id, tenantId: invocation.tenantId || 'global' },
       status: 'running',
       plan: [],
       currentStep: 0,

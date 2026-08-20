@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { getHeapStatistics } from 'node:v8';
 import puppeteer from 'puppeteer-core';
 import type { PlannedAction, RunRecord, StepRecord } from './types.ts';
 
@@ -22,11 +23,14 @@ export class MetacognitionOrgan {
 export class WatchdogOrgan {
   static assess(run: RunRecord, action: PlannedAction): { halt: boolean; alerts: string[]; snapshot: Record<string, unknown> } {
     const heap = process.memoryUsage();
+    const heapLimit = getHeapStatistics().heap_size_limit;
     const alerts: string[] = [];
+    const limitPressure = heap.heapUsed / Math.max(heapLimit, 1);
+    const pressureThreshold = Number(process.env.MICROFIXD_WATCHDOG_HEAP_LIMIT_PRESSURE || 0.9);
     if (process.env.MICROFIXD_EMERGENCY_STOP === 'true' && action.kind !== 'introspect') alerts.push('Emergency stop is active.');
-    if (heap.heapUsed / Math.max(heap.heapTotal, 1) > 0.9) alerts.push('Node heap pressure exceeds 90%.');
+    if (limitPressure > pressureThreshold) alerts.push(`Node heap pressure exceeds the configured ${(pressureThreshold * 100).toFixed(0)}% V8 heap-limit threshold.`);
     if (run.currentStep >= Number(process.env.MICROFIXD_MAX_COMPLETED_STEPS || 25)) alerts.push('The configured completed-step budget has been exhausted.');
-    return { halt: alerts.length > 0, alerts, snapshot: { heapUsedBytes: heap.heapUsed, heapTotalBytes: heap.heapTotal, action: action.kind, runStatus: run.status } };
+    return { halt: alerts.length > 0, alerts, snapshot: { heapUsedBytes: heap.heapUsed, heapAllocatedBytes: heap.heapTotal, heapLimitBytes: heapLimit, heapLimitPressure: Number(limitPressure.toFixed(4)), action: action.kind, runStatus: run.status } };
   }
 }
 

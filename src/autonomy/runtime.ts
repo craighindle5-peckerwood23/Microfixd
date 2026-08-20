@@ -1,16 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import { ParagonDissector } from './governance.ts';
+import { CognitiveControlPlane } from './cognition.ts';
+import { MemoryControlPlane } from './memory.ts';
+import { PuppeteerExecutionControl, WebUseControlPlane } from './execution.ts';
+import { EvolutionControlPlane } from './evolution.ts';
+import { InfrastructureControlPlane } from './infrastructure.ts';
+import { SelfHealingControlPlane } from './self-healing.ts';
+import { SystemWiringControlPlane } from './system-wiring.ts';
+import { FinalAuditControlPlane } from './final-audit.ts';
+import { GovernedBringUpControlPlane } from './bring-up.ts';
 import { ORGAN_REGISTRY, organSummary } from './organ-registry.ts';
+import { OrganLifecycleController } from './organ-lifecycle.ts';
 import { PhenotypeOrgan } from './phenotype.ts';
 import { SandboxWorkspace } from './sandbox.ts';
 import { SecurityOrgans } from './security.ts';
 import { DriftProtectionOrgans, ExecutionStabilizer, RealityAnchoringOrgans } from './integrity.ts';
 import { AutomotiveDiagnosticsOrgan, FallbackSafetyOrgan, MetacognitionOrgan, VisualSnapshotOrgan, WatchdogOrgan, WhiteLabelOrgan, type AutomotiveTelemetry } from './auxiliary-organs.ts';
+import { AGENT_ROLES, ChangeControlPlane, ComputeControlPlane, GLOBAL_TENANT_ID, HealthRepairControlPlane, MultiAgentControlPlane, PlanValidationOrgan, RepairControlPlane, SafeModeControlPlane, TenantControlPlane } from './level6.ts';
 import { createRuntimeStore } from './store.ts';
 import { Telemetry } from './telemetry.ts';
 import type {
   ApprovalRequest,
   GoalInput,
+  Level6Record,
   MemoryRecord,
   PlannedAction,
   Planner,
@@ -62,9 +74,19 @@ export class AutonomyRuntime {
     if (this.initialized) return;
     await this.store.initialize();
     await this.store.registerOrgans([...ORGAN_REGISTRY]);
+    const wiring = await OrganLifecycleController.registerDurableState(this.store);
+    await TenantControlPlane.ensure(this.store, GLOBAL_TENANT_ID, 'Global Operations');
+    await MultiAgentControlPlane.bootstrap(this.store, GLOBAL_TENANT_ID);
+    await ComputeControlPlane.record(this.store, GLOBAL_TENANT_ID);
+    await InfrastructureControlPlane.record(this.store, GLOBAL_TENANT_ID);
+    await WebUseControlPlane.record(this.store, GLOBAL_TENANT_ID);
+    await SelfHealingControlPlane.assess(this.store, GLOBAL_TENANT_ID);
+    await SystemWiringControlPlane.validate(this.store, GLOBAL_TENANT_ID);
+    await GovernedBringUpControlPlane.posture(this.store, GLOBAL_TENANT_ID);
+    await FinalAuditControlPlane.lock(this.store, GLOBAL_TENANT_ID);
     this.initialized = true;
-    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'runtime_initialized', organId: 'cloud-runtime-organ', severity: 'info', fields: { constitution: '1.0.0', organCount: ORGAN_REGISTRY.length }, createdAt: new Date().toISOString() });
-    this.telemetry.event('runtime_initialized', { constitution: '1.0.0', organCount: ORGAN_REGISTRY.length });
+    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'runtime_initialized', organId: 'organ-boot-layer', severity: 'info', fields: { constitution: '2.0.0', organCount: ORGAN_REGISTRY.length, layers: 8, tenant: GLOBAL_TENANT_ID, wiringValid: wiring.valid, wiringEdges: wiring.edges.length, bootOrder: OrganLifecycleController.bootPlan().slice(0, 5).map((organ) => organ.id) }, createdAt: new Date().toISOString() });
+    this.telemetry.event('runtime_initialized', { constitution: '2.0.0', organCount: ORGAN_REGISTRY.length, layers: 8, wiringEdges: wiring.edges.length });
   }
 
   async submitGoal(input: GoalInput): Promise<RunRecord> {
@@ -73,29 +95,48 @@ export class AutonomyRuntime {
     if (!goal) throw new Error('A non-empty high-level goal is required.');
     if (goal.length > 10_000) throw new Error('Goals are limited to 10,000 characters.');
     SecurityOrgans.assertSafeInput({ goal, metadata: input.metadata || {} });
+    const tenantId = (input.tenantId || GLOBAL_TENANT_ID).trim().toLowerCase();
+    await TenantControlPlane.ensure(this.store, tenantId, typeof input.metadata?.tenantName === 'string' ? input.metadata.tenantName : tenantId);
+    const agents = await MultiAgentControlPlane.bootstrap(this.store, tenantId);
+    await SafeModeControlPlane.assertOperational(this.store, 'submit_goal');
 
     const now = new Date().toISOString();
     const run: RunRecord = {
       id: randomUUID(),
+      tenantId,
       agentId: input.agentId?.trim() || 'microfixd-primary',
       goal,
       requestedBy: input.requestedBy?.trim() || 'Craig',
-      metadata: input.metadata || {},
+      metadata: { ...(input.metadata || {}), tenantId },
       status: 'planning',
       plan: [],
       currentStep: 0,
-      workingMemory: { submittedGoal: goal, plannedAt: now, constitution: 'Paragon Dissector Tier-0' },
+      workingMemory: { submittedGoal: goal, plannedAt: now, tenantId, constitution: 'Paragon Dissector Tier-0', agentRoles: agents.map((agent) => agent.payload.role) },
       createdAt: now,
       updatedAt: now,
       startedAt: now,
     };
     await this.store.createRun(run);
-    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'goal_submitted', organId: 'task-engine', runId: run.id, severity: 'info', fields: { requestedBy: run.requestedBy }, createdAt: now });
+    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'goal_submitted', organId: 'task-engine', runId: run.id, severity: 'info', fields: { requestedBy: run.requestedBy, tenantId }, createdAt: now });
+    await MultiAgentControlPlane.route(this.store, tenantId, run.id, 'planner', goal);
 
-    const recalled = await this.store.recallMemory(run.agentId, goal, 8);
+    const recalled = await MemoryControlPlane.recall(this.store, run.tenantId, run.agentId, goal, 8);
     const plan = await this.planner.plan(goal, recalled);
     ExecutionStabilizer.assertPlan(plan);
-    await this.store.updateRun(run.id, { status: 'running', plan, workingMemory: { ...run.workingMemory, recalledMemoryIds: recalled.map((memory) => memory.id), planStepCount: plan.length } });
+    await MultiAgentControlPlane.route(this.store, tenantId, run.id, 'critic-safety', `Review ${plan.length} planned actions for constitutional, safety, drift, doctrine, and tenant-boundary evidence.`);
+    const collaboration = await MultiAgentControlPlane.collaborate(this.store, tenantId, run.id, ['planner', 'critic-safety', 'meta-agent'], 'Prepare a bounded governed plan without granting execution authority.');
+    const plannedRun = { ...run, plan };
+    const planValidation = PlanValidationOrgan.assess(plannedRun);
+    const oversight = await MultiAgentControlPlane.oversight(this.store, tenantId, run.id, ['planner', 'critic-safety', 'meta-agent'], { planValidation: planValidation.outcome, planSteps: plan.length, tenantId });
+    const arbitration = await MultiAgentControlPlane.arbitrate(this.store, tenantId, run.id, [
+      { role: 'planner', statement: `The bounded plan contains ${plan.length} proposed actions.` },
+      { role: 'critic-safety', statement: `Plan validation outcome is ${planValidation.outcome}; Paragon remains the only final action authority.` },
+    ]);
+    await MultiAgentControlPlane.recordHandoff(this.store, tenantId, run.id, 'meta-agent', 'coordinated', { roles: AGENT_ROLES, planSteps: plan.length, collaborationId: collaboration.id, oversightId: oversight.id, arbitrationId: arbitration.id });
+    const cognitiveAssessment = await CognitiveControlPlane.recordAssessment(this.store, plannedRun);
+    const cognitiveMap = await CognitiveControlPlane.recordMap(this.store, plannedRun);
+    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'plan_validated', organId: 'plan-validator', runId: run.id, severity: planValidation.outcome === 'valid-bounded-plan' ? 'info' : 'warning', fields: { ...planValidation, cognitiveAssessmentId: cognitiveAssessment.id, cognitiveMapId: cognitiveMap.id, collaborationId: collaboration.id, oversightId: oversight.id, arbitrationId: arbitration.id }, createdAt: new Date().toISOString() });
+    await this.store.updateRun(run.id, { status: 'running', plan, workingMemory: { ...run.workingMemory, recalledMemoryIds: recalled.map((memory) => memory.id), planStepCount: plan.length, planValidation, cognitiveAssessmentId: cognitiveAssessment.id, cognitiveMapId: cognitiveMap.id, collaborationId: collaboration.id, oversightId: oversight.id, arbitrationId: arbitration.id } });
 
     for (let index = 0; index < plan.length; index += 1) {
       await this.store.createStep({ id: plan[index].id, runId: run.id, sequence: index, action: plan[index], status: 'pending', createdAt: new Date().toISOString() });
@@ -120,15 +161,18 @@ export class AutonomyRuntime {
       }
 
       run = (await this.store.getRun(runId))!;
+      await SafeModeControlPlane.assertOperational(this.store, step.action.kind);
       ExecutionStabilizer.assertProgress(run, step);
+      await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'cognitive_action_preflight', organId: 'cognition-engine', runId, severity: 'info', fields: CognitiveControlPlane.evidenceFor(step.action), createdAt: new Date().toISOString() });
       DriftProtectionOrgans.assertWithinBaseline(run, step.action);
       const watchdog = WatchdogOrgan.assess(run, step.action);
       if (watchdog.halt) {
         const now = new Date().toISOString();
         const fallback = FallbackSafetyOrgan.safeFallback(run, step.action, watchdog.alerts.join(' '));
+        const failure = await SelfHealingControlPlane.recordFailure(this.store, { tenantId: run.tenantId, runId, scope: 'runtime', severity: 'critical', message: watchdog.alerts.join(' '), evidence: { action: step.action.kind, watchdog: watchdog.snapshot, fallback } });
         await this.store.updateStep(step.id, { status: 'failed', error: watchdog.alerts.join(' '), result: fallback, completedAt: now });
         await this.store.updateRun(runId, { status: 'failed', error: watchdog.alerts.join(' '), completedAt: now });
-        await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'watchdog_halt', organId: 'execution-stabilizer', runId, severity: 'critical', fields: { alerts: watchdog.alerts, snapshot: watchdog.snapshot, fallback }, createdAt: now });
+        await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'watchdog_halt', organId: 'execution-stabilizer', runId, severity: 'critical', fields: { alerts: watchdog.alerts, snapshot: watchdog.snapshot, fallback, healthAssessmentId: failure.id }, createdAt: now });
         this.telemetry.event('watchdog_halt', { alerts: watchdog.alerts.join(' | '), action: step.action.kind }, runId);
         return await this.store.getRun(runId);
       }
@@ -154,14 +198,15 @@ export class AutonomyRuntime {
       }
 
       try {
-        const rawResult = await this.executeAction(run, step.action);
+        const rawResult = await PuppeteerExecutionControl.execute(this.store, run, step.action, async () => this.executeAction(run, step.action));
         RealityAnchoringOrgans.assertNoUnsupportedClaim(rawResult);
         const result = RealityAnchoringOrgans.qualify(rawResult);
+        if (['propose_capability', 'sandbox_validate'].includes(step.action.kind)) await MultiAgentControlPlane.recordHandoff(this.store, run.tenantId, run.id, 'builder', 'sandbox-artifact-created', { action: step.action.kind, boundary: 'Sandbox candidate only; no capability activation or production change.' });
         const completedAt = new Date().toISOString();
         await this.store.updateStep(step.id, { status: 'succeeded', result, completedAt });
         run = (await this.store.updateRun(runId, { currentStep: step.sequence + 1, workingMemory: { ...run.workingMemory, [`step_${step.sequence}`]: result, baseline: DriftProtectionOrgans.baseline(run) } }))!;
-        await this.store.appendMemory({
-          id: randomUUID(), agentId: run.agentId, runId, kind: 'experience',
+        await MemoryControlPlane.append(this.store, {
+          id: randomUUID(), tenantId: run.tenantId, agentId: run.agentId, runId, kind: 'experience',
           content: `Action “${step.action.title}” completed successfully for goal “${run.goal}”.`,
           tags: [step.action.kind, 'governed-execution'], importance: 0.6, score: 1,
           metadata: { stepId: step.id, result }, createdAt: completedAt,
@@ -172,31 +217,36 @@ export class AutonomyRuntime {
         await this.store.updateStep(step.id, { status: 'failed', error: message, completedAt: new Date().toISOString() });
         await this.store.updateRun(runId, { status: 'failed', error: message, completedAt: new Date().toISOString() });
         const fallback = FallbackSafetyOrgan.safeFallback(run, step.action, message);
-        await this.store.appendMemory({
-          id: randomUUID(), agentId: run.agentId, runId, kind: 'experience', content: `Action “${step.action.title}” failed: ${message}`,
+        const failure = await SelfHealingControlPlane.recordFailure(this.store, { tenantId: run.tenantId, runId, scope: 'workflow', severity: 'warning', message, evidence: { action: step.action.kind, fallback } });
+        const repair = await HealthRepairControlPlane.assess(this.store, this.sandbox, run, message);
+        await MultiAgentControlPlane.recordHandoff(this.store, run.tenantId, run.id, 'repair', 'proposal-created', { repairProposalId: repair.id, healthAssessmentId: failure.id, action: step.action.kind, boundary: 'Sandbox proposal only; no repair activation.' });
+        await MemoryControlPlane.append(this.store, {
+          id: randomUUID(), tenantId: run.tenantId, agentId: run.agentId, runId, kind: 'experience', content: `Action “${step.action.title}” failed: ${message}`,
           tags: [step.action.kind, 'failure', 'self-healing-fallback'], importance: 0.9, score: -1, metadata: { stepId: step.id, fallback }, createdAt: new Date().toISOString(),
         });
-        await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'fallback_activated', organId: 'fallback-safety-organ', runId, severity: 'warning', fields: fallback, createdAt: new Date().toISOString() });
+        await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'fallback_activated', organId: 'fallback-safety-organ', runId, severity: 'warning', fields: { ...fallback, healthAssessmentId: failure.id }, createdAt: new Date().toISOString() });
         this.telemetry.increment('steps_total', { status: 'failed', action: step.action.kind });
         return await this.store.getRun(runId);
       }
     }
 
     run = (await this.store.updateRun(runId, { status: 'succeeded', outcome: 'All bounded actions completed under recorded Tier-0 Paragon decisions.', completedAt: new Date().toISOString() }))!;
+    await MultiAgentControlPlane.recordHandoff(this.store, run.tenantId, run.id, 'reflection', 'completed', { completedSteps: run.currentStep, outcome: run.outcome });
     this.telemetry.increment('runs_total', { status: 'succeeded' });
     this.telemetry.event('run_completed', { status: 'succeeded', completedSteps: run.currentStep }, runId);
     return run;
   }
 
-  async decideApproval(approvalId: string, approved: boolean, note: string, actor = 'Craig'): Promise<ApprovalRequest | undefined> {
+  async decideApproval(approvalId: string, approved: boolean, note: string, actor: string, tenantId: string): Promise<ApprovalRequest | undefined> {
     await this.initialize();
+    TenantControlPlane.assertIdentifier(tenantId);
     const approval = await this.store.getApproval(approvalId);
     if (!approval || approval.status !== 'pending') return approval;
+    const run = await this.store.getRun(approval.runId);
+    if (!run || run.tenantId !== tenantId) return undefined;
     const now = new Date().toISOString();
     const status = approved ? 'approved' : 'rejected';
     const updated = await this.store.updateApproval(approvalId, { status, decidedAt: now, decidedBy: actor, decisionNote: note.slice(0, 2000) });
-    const run = await this.store.getRun(approval.runId);
-    if (!run) return updated;
 
     const step = (await this.store.listSteps(run.id)).find((candidate) => candidate.id === approval.stepId);
     if (step) {
@@ -222,6 +272,14 @@ export class AutonomyRuntime {
     return { run, steps: await this.store.listSteps(runId) };
   }
 
+  async listApprovals(tenantId: string, status?: ApprovalRequest['status']): Promise<ApprovalRequest[]> {
+    await this.initialize();
+    TenantControlPlane.assertIdentifier(tenantId);
+    const candidates = await this.store.listApprovals(status);
+    const ownership = await Promise.all(candidates.map(async (approval) => ({ approval, run: await this.store.getRun(approval.runId) })));
+    return ownership.filter(({ run }) => run?.tenantId === tenantId).map(({ approval }) => approval);
+  }
+
   async introspect(runId?: string): Promise<Record<string, unknown>> {
     await this.initialize();
     const storage = await this.store.health();
@@ -230,13 +288,24 @@ export class AutonomyRuntime {
     if (runId) await this.store.appendPhenotype({ id: randomUUID(), runId, snapshot: phenotype as unknown as Record<string, unknown>, createdAt: phenotype.timestamp });
     return {
       organ: 'System Inspector',
-      service: 'Microfixd',
+      service: 'Microfixd Level-6 Operations Platform',
       constitution: 'Paragon Dissector Tier-0',
       organs: organSummary(),
       process: { pid: process.pid, node: process.version, uptimeSeconds: Math.floor(process.uptime()), platform: process.platform, architecture: process.arch },
       phenotype,
       storage,
       sandbox,
+      layers: { foundational: 8, names: ['Constitutional', 'Organ Architecture', 'Cognitive', 'Memory', 'Execution', 'Self-Evolution', 'Safety', 'Infrastructure'], overlays: ['Mission Control OS/UI', 'Multi-Tenant Enterprise'] },
+      tenants: await TenantControlPlane.list(this.store),
+      agents: await MultiAgentControlPlane.list(this.store, GLOBAL_TENANT_ID),
+      compute: ComputeControlPlane.scan(),
+      infrastructure: InfrastructureControlPlane.posture(),
+      selfHealing: await SelfHealingControlPlane.assess(this.store, GLOBAL_TENANT_ID),
+      wiring: await SystemWiringControlPlane.validate(this.store, GLOBAL_TENANT_ID),
+      audit: await FinalAuditControlPlane.audit(this.store, GLOBAL_TENANT_ID),
+      governanceLock: await FinalAuditControlPlane.lock(this.store, GLOBAL_TENANT_ID),
+      bringUp: await GovernedBringUpControlPlane.posture(this.store, GLOBAL_TENANT_ID),
+      safeMode: await SafeModeControlPlane.get(this.store),
       emergencyStop: process.env.MICROFIXD_EMERGENCY_STOP === 'true',
       timestamp: new Date().toISOString(),
     };
@@ -246,6 +315,123 @@ export class AutonomyRuntime {
     await this.initialize();
     const record = await this.getRunWithSteps(runId);
     return record ? MetacognitionOrgan.assess(record.run, record.steps) : undefined;
+  }
+
+  async ensureTenant(tenantId: string, name?: string): Promise<Level6Record> {
+    await this.initialize();
+    const tenant = await TenantControlPlane.ensure(this.store, tenantId, name || tenantId);
+    await MultiAgentControlPlane.bootstrap(this.store, tenantId);
+    await ComputeControlPlane.record(this.store, tenantId);
+    await InfrastructureControlPlane.record(this.store, tenantId);
+    await WebUseControlPlane.record(this.store, tenantId);
+    await SelfHealingControlPlane.assess(this.store, tenantId);
+    await SystemWiringControlPlane.validate(this.store, tenantId);
+    await GovernedBringUpControlPlane.posture(this.store, tenantId);
+    await FinalAuditControlPlane.lock(this.store, tenantId);
+    return tenant;
+  }
+
+  async memoryPosture(tenantId: string, agentId = 'microfixd-primary'): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return MemoryControlPlane.recordPosture(this.store, tenantId, agentId);
+  }
+
+  async proposeMemoryCompression(tenantId: string, agentId = 'microfixd-primary'): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return MemoryControlPlane.proposeCompression(this.store, tenantId, agentId);
+  }
+
+  async listTenants(): Promise<Level6Record[]> {
+    await this.initialize();
+    return TenantControlPlane.list(this.store);
+  }
+
+  computePosture(): Record<string, unknown> {
+    return ComputeControlPlane.scan();
+  }
+
+  async computeAssessment(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return ComputeControlPlane.record(this.store, tenantId);
+  }
+
+  async infrastructurePosture(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return InfrastructureControlPlane.record(this.store, tenantId);
+  }
+
+  async webUsePosture(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return WebUseControlPlane.record(this.store, tenantId);
+  }
+
+  async selfHealingPosture(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return SelfHealingControlPlane.assess(this.store, tenantId);
+  }
+
+  async masterWiringPosture(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return SystemWiringControlPlane.validate(this.store, tenantId);
+  }
+
+  async fullSystemAudit(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    await ComputeControlPlane.record(this.store, tenantId);
+    await InfrastructureControlPlane.record(this.store, tenantId);
+    await WebUseControlPlane.record(this.store, tenantId);
+    await SelfHealingControlPlane.assess(this.store, tenantId);
+    await SystemWiringControlPlane.validate(this.store, tenantId);
+    return FinalAuditControlPlane.audit(this.store, tenantId);
+  }
+
+  async governanceLockPosture(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return FinalAuditControlPlane.lock(this.store, tenantId);
+  }
+
+  async bringUpPosture(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return GovernedBringUpControlPlane.posture(this.store, tenantId);
+  }
+
+  async listAgents(tenantId = GLOBAL_TENANT_ID): Promise<Level6Record[]> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return MultiAgentControlPlane.list(this.store, tenantId);
+  }
+
+  async multiAgentPosture(tenantId = GLOBAL_TENANT_ID): Promise<Record<string, unknown>> {
+    await this.initialize();
+    await TenantControlPlane.ensure(this.store, tenantId);
+    return MultiAgentControlPlane.posture(this.store, tenantId);
+  }
+
+  async setSafeMode(enabled: boolean, actor: string, reason: string): Promise<Level6Record> {
+    await this.initialize();
+    const record = await SafeModeControlPlane.set(this.store, enabled, actor, reason);
+    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'safe_mode_changed', organId: 'safe-mode-control-organ', severity: enabled ? 'warning' : 'info', fields: { enabled, actor }, createdAt: new Date().toISOString() });
+    return record;
+  }
+
+  async requestGithubChange(runId: string, tenantId: string, summary: string): Promise<Level6Record | undefined> {
+    await this.initialize();
+    const run = await this.store.getRun(runId);
+    if (!run) return undefined;
+    TenantControlPlane.assertRunAccess(run, tenantId);
+    const request = await EvolutionControlPlane.requestGithubPipeline(this.store, run, summary);
+    await this.store.appendSystemEvent({ id: randomUUID(), eventName: 'github_change_requested', organId: 'change-request-organ', runId, severity: 'warning', fields: { changeRequestId: request.id, tenantId, adapter: 'dormant-pending-approved-plugin' }, createdAt: new Date().toISOString() });
+    return request;
   }
 
   async automotiveDiagnostics(telemetry: AutomotiveTelemetry): Promise<Record<string, unknown>> {
@@ -267,15 +453,15 @@ export class AutonomyRuntime {
       case 'introspect':
         return await this.introspect(run.id);
       case 'recall_memory': {
-        const memory = await this.store.recallMemory(run.agentId, String(action.input.query || run.goal), 8);
+        const memory = await MemoryControlPlane.recall(this.store, run.tenantId, run.agentId, String(action.input.query || run.goal), 8);
         return { recalled: memory.map((item) => ({ id: item.id, kind: item.kind, content: item.content, score: item.score, createdAt: item.createdAt })), count: memory.length };
       }
       case 'design_workflow':
         return { workflow: { objective: run.goal, boundedSteps: ['inspect state', 'recall experience', 'produce confined artifact when applicable', 'record governed outcome'], prohibited: ['direct network access', 'host execution', 'production activation without approval'] } };
       case 'propose_capability':
       case 'sandbox_validate': {
-        const artifact = await this.sandbox.validateCapability(String(action.input.title || 'Microfixd capability'), String(action.input.specification || run.goal));
-        return { artifact };
+        const proposal = await EvolutionControlPlane.propose(this.store, this.sandbox, run, String(action.input.title || 'Microfixd capability'), String(action.input.specification || run.goal), action.kind === 'sandbox_validate' ? 'refactor' : 'capability');
+        return { evolution: proposal, artifact: proposal.payload.artifact };
       }
       case 'apply_capability':
       case 'external_effect':

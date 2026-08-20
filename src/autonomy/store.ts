@@ -5,6 +5,8 @@ import type {
   ApprovalRequest,
   ApprovalStatus,
   IntegrationAuditRecord,
+  Level6Record,
+  Level6RecordType,
   MemoryRecord,
   OrganInvocationRecord,
   OrganRegistryRecord,
@@ -27,14 +29,16 @@ type JsonState = {
   organInvocations: OrganInvocationRecord[];
   phenotypes: PhenotypeRecord[];
   systemEvents: SystemEventRecord[];
+  level6Records: Level6Record[];
 };
 
-const emptyState = (): JsonState => ({ runs: [], steps: [], memory: [], decisions: [], approvals: [], integrationAudits: [], organRegistry: [], organInvocations: [], phenotypes: [], systemEvents: [] });
+const emptyState = (): JsonState => ({ runs: [], steps: [], memory: [], decisions: [], approvals: [], integrationAudits: [], organRegistry: [], organInvocations: [], phenotypes: [], systemEvents: [], level6Records: [] });
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 export class JsonRuntimeStore implements RuntimeStore {
   private state: JsonState = emptyState();
   private initialized = false;
+  private persistQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly filePath: string) {}
 
@@ -94,10 +98,10 @@ export class JsonRuntimeStore implements RuntimeStore {
     await this.persist();
   }
 
-  async recallMemory(agentId: string, query: string, limit: number): Promise<MemoryRecord[]> {
+  async recallMemory(agentId: string, query: string, limit: number, tenantId: string): Promise<MemoryRecord[]> {
     const normalized = query.toLowerCase().split(/\s+/).filter((token) => token.length >= 3);
     return this.state.memory
-      .filter((memory) => memory.agentId === agentId)
+      .filter((memory) => memory.agentId === agentId && memory.tenantId === tenantId)
       .map((memory) => ({ memory, relevance: normalized.reduce((score, token) => score + Number(`${memory.content} ${memory.tags.join(' ')}`.toLowerCase().includes(token)), 0) }))
       .filter(({ relevance }) => relevance > 0 || normalized.length === 0)
       .sort((a, b) => b.relevance - a.relevance || b.memory.importance - a.memory.importance)
@@ -164,10 +168,26 @@ export class JsonRuntimeStore implements RuntimeStore {
     await this.persist();
   }
 
+  async upsertLevel6Record(record: Level6Record): Promise<void> {
+    const index = this.state.level6Records.findIndex((candidate) => candidate.id === record.id);
+    if (index >= 0) this.state.level6Records[index] = clone(record);
+    else this.state.level6Records.push(clone(record));
+    await this.persist();
+  }
+
+  async listLevel6Records(type: Level6RecordType, tenantId?: string): Promise<Level6Record[]> {
+    return this.state.level6Records.filter((record) => record.type === type && (!tenantId || record.tenantId === tenantId)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(clone);
+  }
+
   private async persist(): Promise<void> {
-    const tempPath = `${this.filePath}.tmp`;
-    await writeFile(tempPath, JSON.stringify(this.state, null, 2), { mode: 0o600 });
-    await rename(tempPath, this.filePath);
+    const snapshot = JSON.stringify(this.state, null, 2);
+    const write = async (): Promise<void> => {
+      const tempPath = `${this.filePath}.tmp`;
+      await writeFile(tempPath, snapshot, { mode: 0o600 });
+      await rename(tempPath, this.filePath);
+    };
+    this.persistQueue = this.persistQueue.then(write, write);
+    return this.persistQueue;
   }
 }
 
@@ -185,7 +205,7 @@ export class PostgresRuntimeStore implements RuntimeStore {
   async initialize(): Promise<void> {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS microfixd_runtime_runs (
-        id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, goal TEXT NOT NULL, requested_by TEXT NOT NULL,
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 'global', agent_id TEXT NOT NULL, goal TEXT NOT NULL, requested_by TEXT NOT NULL,
         metadata JSONB NOT NULL DEFAULT '{}'::jsonb, status TEXT NOT NULL, plan JSONB NOT NULL DEFAULT '[]'::jsonb,
         current_step INTEGER NOT NULL DEFAULT 0, working_memory JSONB NOT NULL DEFAULT '{}'::jsonb,
         outcome TEXT, error TEXT, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
@@ -197,11 +217,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
         result JSONB, error TEXT, started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL
       );
       CREATE TABLE IF NOT EXISTS microfixd_memory_records (
-        id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, run_id TEXT, kind TEXT NOT NULL, content TEXT NOT NULL,
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 'global', agent_id TEXT NOT NULL, run_id TEXT, kind TEXT NOT NULL, content TEXT NOT NULL,
         tags JSONB NOT NULL DEFAULT '[]'::jsonb, importance DOUBLE PRECISION NOT NULL, score DOUBLE PRECISION,
         metadata JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS microfixd_memory_records_agent_created ON microfixd_memory_records (agent_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS microfixd_memory_records_agent_created ON microfixd_memory_records (tenant_id, agent_id, created_at DESC);
       CREATE TABLE IF NOT EXISTS microfixd_governance_decisions (
         id TEXT PRIMARY KEY, run_id TEXT NOT NULL, step_id TEXT NOT NULL, action_kind TEXT NOT NULL,
         risk TEXT NOT NULL, outcome TEXT NOT NULL, reasons JSONB NOT NULL, evidence JSONB NOT NULL,
@@ -219,6 +239,11 @@ export class PostgresRuntimeStore implements RuntimeStore {
         details JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL
       );
       CREATE INDEX IF NOT EXISTS microfixd_integration_audits_run_created ON microfixd_integration_audits (run_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS microfixd_level6_records (
+        id TEXT PRIMARY KEY, record_type TEXT NOT NULL, tenant_id TEXT NOT NULL, name TEXT NOT NULL,
+        status TEXT NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS microfixd_level6_records_type_tenant_idx ON microfixd_level6_records (record_type, tenant_id, updated_at DESC);
     `);
   }
 
@@ -229,9 +254,9 @@ export class PostgresRuntimeStore implements RuntimeStore {
 
   async createRun(run: RunRecord): Promise<void> {
     await this.pool.query(
-      `INSERT INTO microfixd_runtime_runs (id, agent_id, goal, requested_by, metadata, status, plan, current_step, working_memory, outcome, error, created_at, updated_at, started_at, completed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [run.id, run.agentId, run.goal, run.requestedBy, run.metadata, run.status, run.plan, run.currentStep, run.workingMemory, run.outcome ?? null, run.error ?? null, run.createdAt, run.updatedAt, run.startedAt ?? null, run.completedAt ?? null],
+      `INSERT INTO microfixd_runtime_runs (id, tenant_id, agent_id, goal, requested_by, metadata, status, plan, current_step, working_memory, outcome, error, created_at, updated_at, started_at, completed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      [run.id, run.tenantId, run.agentId, run.goal, run.requestedBy, run.metadata, run.status, run.plan, run.currentStep, run.workingMemory, run.outcome ?? null, run.error ?? null, run.createdAt, run.updatedAt, run.startedAt ?? null, run.completedAt ?? null],
     );
   }
 
@@ -245,8 +270,8 @@ export class PostgresRuntimeStore implements RuntimeStore {
     if (!current) return undefined;
     const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
     await this.pool.query(
-      `UPDATE microfixd_runtime_runs SET agent_id=$2, goal=$3, requested_by=$4, metadata=$5, status=$6, plan=$7, current_step=$8, working_memory=$9, outcome=$10, error=$11, updated_at=$12, started_at=$13, completed_at=$14 WHERE id=$1`,
-      [id, next.agentId, next.goal, next.requestedBy, next.metadata, next.status, next.plan, next.currentStep, next.workingMemory, next.outcome ?? null, next.error ?? null, next.updatedAt, next.startedAt ?? null, next.completedAt ?? null],
+      `UPDATE microfixd_runtime_runs SET tenant_id=$2, agent_id=$3, goal=$4, requested_by=$5, metadata=$6, status=$7, plan=$8, current_step=$9, working_memory=$10, outcome=$11, error=$12, updated_at=$13, started_at=$14, completed_at=$15 WHERE id=$1`,
+      [id, next.tenantId, next.agentId, next.goal, next.requestedBy, next.metadata, next.status, next.plan, next.currentStep, next.workingMemory, next.outcome ?? null, next.error ?? null, next.updatedAt, next.startedAt ?? null, next.completedAt ?? null],
     );
     return next;
   }
@@ -278,16 +303,16 @@ export class PostgresRuntimeStore implements RuntimeStore {
 
   async appendMemory(memory: MemoryRecord): Promise<void> {
     await this.pool.query(
-      `INSERT INTO microfixd_memory_records (id, agent_id, run_id, kind, content, tags, importance, score, metadata, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [memory.id, memory.agentId, memory.runId ?? null, memory.kind, memory.content, memory.tags, memory.importance, memory.score ?? null, memory.metadata, memory.createdAt],
+      `INSERT INTO microfixd_memory_records (id, tenant_id, agent_id, run_id, kind, content, tags, importance, score, metadata, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [memory.id, memory.tenantId, memory.agentId, memory.runId ?? null, memory.kind, memory.content, memory.tags, memory.importance, memory.score ?? null, memory.metadata, memory.createdAt],
     );
   }
 
-  async recallMemory(agentId: string, query: string, limit: number): Promise<MemoryRecord[]> {
+  async recallMemory(agentId: string, query: string, limit: number, tenantId: string): Promise<MemoryRecord[]> {
     const result = await this.pool.query(
-      `SELECT * FROM microfixd_memory_records WHERE agent_id=$1 AND ($2='' OR content ILIKE '%' || $2 || '%') ORDER BY importance DESC, created_at DESC LIMIT $3`,
-      [agentId, query.slice(0, 500), limit],
+      `SELECT * FROM microfixd_memory_records WHERE tenant_id=$1 AND agent_id=$2 AND ($3='' OR content ILIKE '%' || $3 || '%') ORDER BY importance DESC, created_at DESC LIMIT $4`,
+      [tenantId, agentId, query.slice(0, 500), limit],
     );
     return result.rows.map(rowToMemory);
   }
@@ -347,10 +372,10 @@ export class PostgresRuntimeStore implements RuntimeStore {
   async registerOrgans(organs: OrganRegistryRecord[]): Promise<void> {
     for (const organ of organs) {
       await this.pool.query(
-        `INSERT INTO public.microfixd_organ_registry (id, name, family, family_number, tier, mode, guided_path, final_authority, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now())
-         ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, family=EXCLUDED.family, family_number=EXCLUDED.family_number, tier=EXCLUDED.tier, mode=EXCLUDED.mode, guided_path=EXCLUDED.guided_path, final_authority=EXCLUDED.final_authority, updated_at=now()`,
-        [organ.id, organ.name, organ.family, organ.familyNumber, organ.tier, organ.mode, organ.guidedPath, organ.finalAuthority],
+        `INSERT INTO public.microfixd_organ_registry (id, name, family, family_number, layer, version, tier, mode, guided_path, final_authority, metadata, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+         ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, family=EXCLUDED.family, family_number=EXCLUDED.family_number, layer=EXCLUDED.layer, version=EXCLUDED.version, tier=EXCLUDED.tier, mode=EXCLUDED.mode, guided_path=EXCLUDED.guided_path, final_authority=EXCLUDED.final_authority, metadata=EXCLUDED.metadata, updated_at=now()`,
+        [organ.id, organ.name, organ.family, organ.familyNumber, organ.layer, organ.version, organ.tier, organ.mode, organ.guidedPath, organ.finalAuthority, organ.metadata],
       );
     }
   }
@@ -376,10 +401,26 @@ export class PostgresRuntimeStore implements RuntimeStore {
       [event.id, event.eventName, event.organId ?? null, event.runId ?? null, event.severity, event.fields, event.createdAt],
     );
   }
+
+  async upsertLevel6Record(record: Level6Record): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO public.microfixd_level6_records (id, record_type, tenant_id, name, status, payload, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, name=EXCLUDED.name, status=EXCLUDED.status, payload=EXCLUDED.payload, updated_at=EXCLUDED.updated_at`,
+      [record.id, record.type, record.tenantId, record.name, record.status, record.payload, record.createdAt, record.updatedAt],
+    );
+  }
+
+  async listLevel6Records(type: Level6RecordType, tenantId?: string): Promise<Level6Record[]> {
+    const result = tenantId
+      ? await this.pool.query('SELECT * FROM public.microfixd_level6_records WHERE record_type=$1 AND tenant_id=$2 ORDER BY updated_at DESC', [type, tenantId])
+      : await this.pool.query('SELECT * FROM public.microfixd_level6_records WHERE record_type=$1 ORDER BY updated_at DESC', [type]);
+    return result.rows.map((row) => ({ id: row.id, type: row.record_type, tenantId: row.tenant_id, name: row.name, status: row.status, payload: row.payload || {}, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString() }));
+  }
 }
 
 const rowToRun = (row: Record<string, any>): RunRecord => ({
-  id: row.id, agentId: row.agent_id, goal: row.goal, requestedBy: row.requested_by, metadata: row.metadata || {}, status: row.status,
+  id: row.id, tenantId: row.tenant_id || row.metadata?.tenantId || 'global', agentId: row.agent_id, goal: row.goal, requestedBy: row.requested_by, metadata: row.metadata || {}, status: row.status,
   plan: row.plan || [], currentStep: row.current_step, workingMemory: row.working_memory || {}, outcome: row.outcome ?? undefined,
   error: row.error ?? undefined, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
   startedAt: row.started_at?.toISOString(), completedAt: row.completed_at?.toISOString(),
@@ -389,7 +430,7 @@ const rowToStep = (row: Record<string, any>): StepRecord => ({
   result: row.result ?? undefined, error: row.error ?? undefined, startedAt: row.started_at?.toISOString(), completedAt: row.completed_at?.toISOString(), createdAt: row.created_at.toISOString(),
 });
 const rowToMemory = (row: Record<string, any>): MemoryRecord => ({
-  id: row.id, agentId: row.agent_id, runId: row.run_id ?? undefined, kind: row.kind, content: row.content, tags: row.tags || [],
+  id: row.id, tenantId: row.tenant_id || row.metadata?.tenantId || 'global', agentId: row.agent_id, runId: row.run_id ?? undefined, kind: row.kind, content: row.content, tags: row.tags || [],
   importance: row.importance, score: row.score ?? undefined, metadata: row.metadata || {}, createdAt: row.created_at.toISOString(),
 });
 const rowToApproval = (row: Record<string, any>): ApprovalRequest => ({

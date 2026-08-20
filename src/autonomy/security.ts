@@ -1,4 +1,4 @@
-const SECRET_PATTERN = /(?:\b(?:api[_ -]?key|secret|token|password|private[_ -]?key|authorization)\b\s*(?:[:=]|is)\s*['"]?)(?:[a-z0-9_\-.]{8,})/i;
+const SECRET_PATTERN = /(?:\b(?:api[_ -]?key|secret|token|password|private[_ -]?key|authorization)\b[\"']?\s*(?:[:=]|is)\s*['\"]?)(?:[a-z0-9_\-.]{8,})/i;
 const HIGH_RISK_INPUT = /(?:\b(?:rm\s+-rf|curl\s+.*\|\s*(?:sh|bash)|wget\s+.*\|\s*(?:sh|bash)|child_process|process\.env|eval\(|new Function|disable\s+paragon|bypass\s+(?:paragon|omnirouter)|override\s+(?:constitution|doctrine)))/i;
 
 export type SecurityFinding = { organ: string; severity: 'low' | 'medium' | 'high'; message: string };

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { ParagonDissector } from './governance.ts';
 import type { RuntimeStore } from './types.ts';
 import type { Telemetry } from './telemetry.ts';
+import { SecurityOrgans } from './security.ts';
 
 export type PluginRoute = {
   id: string;
@@ -105,6 +106,14 @@ export class OmniRouter {
   ) {}
 
   async route(request: RouterRequest): Promise<RouterResponse> {
+    try {
+      SecurityOrgans.assertSafeInput({ pluginId: request.pluginId, operation: request.operation, method: request.method, path: request.path, query: request.query, body: request.body, headers: request.headers });
+    } catch (error) {
+      const detail = SecurityOrgans.redact((error as Error).message);
+      await this.audit(request, { outcome: 'blocked', estimatedCostUsd: 0, attempt: 0, details: { reason: detail, gate: 'Security Organ before Plugin Registry and OmniRouter routing.' } });
+      this.telemetry.increment('integration_requests_total', { outcome: 'blocked', plugin: request.pluginId });
+      return { status: 'blocked', cached: false, detail };
+    }
     const plugin = this.registry.get(request.pluginId);
     if (!plugin || !plugin.enabled || !plugin.allowedOperations.includes(request.operation)) {
       await this.audit(request, { outcome: 'blocked', estimatedCostUsd: 0, attempt: 0, details: { reason: 'Plugin missing, disabled, or not allowed for this operation.' } });

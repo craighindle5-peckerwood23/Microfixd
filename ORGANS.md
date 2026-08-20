@@ -1,6 +1,6 @@
-# Microfixd 150-Organ Constitution
+# Microfixd 200-Organ Registry Reference
 
-Microfixd is organized as a **150-organ synthetic system**. The organ roster is a runtime contract, not a marketing taxonomy: every organ has an immutable identity, a family, a Tier-1 or Tier-2 responsibility, an implementation mode, and a mandatory Tier-0 Paragon Dissector decision boundary. Paragon itself is the sole **Tier-0** organ and has no override path.
+Microfixd is organized as a **200-organ synthetic system across 21 families and eight foundational layers**. The organ roster is a runtime contract, not a marketing taxonomy: every organ has an immutable identity, a family, a Tier-1 or Tier-2 responsibility, an implementation mode, and a mandatory Tier-0 Paragon Dissector decision boundary. Paragon itself is the sole **Tier-0** organ and has no override path. For the registry-derived layer map, full 200-organ inventory, overlay controls, and governed wiring paths, see [COMPLETE_SYSTEM_SUMMARY.md](COMPLETE_SYSTEM_SUMMARY.md).
 
 > An organ may execute a native internal operation, compose a governed workflow, or expose a disabled external-adapter boundary. An adapter does not gain provider credentials or network access by existing in the registry; it becomes operational only through Plugin Registry and OmniRouter after Paragon review.
 

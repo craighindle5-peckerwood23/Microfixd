@@ -4,8 +4,19 @@ import type { PlannedAction, PolicyDecision, PolicyEngine, RunRecord, StepRecord
 const HIGH_RISK_TERMS = /(?:secret|token|credential|password|api[_ -]?key|deploy|production|database migration|schema|dependency|package\.json|dockerfile|railway|azure|gcp|github|git push|terraform|cloud)/i;
 const FORBIDDEN_TERMS = /(?:disable paragon|bypass paragon|override doctrine|exfiltrat|rm\s+-rf|curl\s+.*\|\s*(?:sh|bash)|child_process|process\.env|eval\(|new Function)/i;
 
+export const DOCTRINE = Object.freeze({
+  version: '2.0.0',
+  authority: 'Doctrine guides presentation, narrative, escalation style, and tenant-local expression but cannot relax constitutional invariants, safety controls, Paragon authority, or Craig approval requirements.',
+  invariants: [
+    'Outputs must distinguish observed evidence, bounded inference, and unverified claims.',
+    'Tenant doctrine may restrict local presentation but cannot alter global safety, routing, isolation, or governance requirements.',
+    'Cinematic, narrative, and UI presentation must not conceal safety status, approval state, or adapter boundaries.',
+    'Escalations remain explicit, evidence-backed, and attributable to the governing control that requested them.',
+  ],
+});
+
 export const CONSTITUTION = Object.freeze({
-  version: '1.0.0',
+  version: '2.0.0',
   authority: 'Paragon Dissector is the final binding oversight authority for all Microfixd organs.',
   invariants: [
     'Every executable operation requires a recorded Paragon decision.',
@@ -14,6 +25,10 @@ export const CONSTITUTION = Object.freeze({
     'No self-modification may activate, merge, deploy, or alter governance without Craig approval.',
     'High-risk, high-cost, and uncertain actions escalate to Craig.',
     'All decisions, route selections, retries, cache hits, and plugin actions are auditable.',
+    'Global Tier-0 Paragon authority precedes every tenant constitution, agent role, workflow, runtime, and mission-control request.',
+    'No tenant may read, write, route, approve, or execute against another tenant context.',
+    'GPU, eGPU, distributed compute, browser web-use, GitHub, CI/CD, and deployment integrations remain Plugin Registry and OmniRouter governed provider routes.',
+    'Safe mode halts non-inspection work without deleting durable evidence or activating repair candidates.',
   ],
 });
 
@@ -76,6 +91,7 @@ export class ParagonDissector implements PolicyEngine {
         constitutionVersion: CONSTITUTION.version,
         organ: 'Paragon Dissector',
         runStatus: run.status,
+        tenantId: run.tenantId,
         actionTitle: action.title,
         emergencyStop: process.env.MICROFIXD_EMERGENCY_STOP === 'true',
       },
@@ -94,6 +110,7 @@ export class ParagonDissector implements PolicyEngine {
   }): PolicyDecision {
     const syntheticRun: RunRecord = {
       id: input.runId,
+      tenantId: 'global',
       agentId: 'integration-organ',
       goal: `Plugin action: ${input.pluginId}/${input.operation}`,
       requestedBy: 'system',
