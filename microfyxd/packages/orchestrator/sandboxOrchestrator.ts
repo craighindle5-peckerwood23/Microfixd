@@ -1,15 +1,14 @@
 /**
- * SandboxOrchestrator — wires Chat → Groq → FileMap → Sandbox → Preview
- * Minimal, deterministic, no streaming.
+ * SandboxOrchestrator prepares code-generation requests but never opens a
+ * network connection. A caller must inject an OmniRouter-backed transport
+ * that has already passed Plugin Registry and Tier-0 Paragon review.
  */
-
 export interface FileMap {
   [filename: string]: string;
 }
 
 export interface OrchestratorRequest {
   prompt: string;
-  groqApiKey: string;
   model?: string;
   existingFiles?: FileMap;
 }
@@ -21,72 +20,37 @@ export interface OrchestratorResponse {
   error?: string;
 }
 
-const DEFAULT_MODEL = 'llama-3.3-70b-versatile';
-const MAX_TOKENS = 2048;
-const SYSTEM_PROMPT = `You are a code generator. Return ONLY a JSON object mapping filenames to file contents. No markdown, no explanation, no code fences. Example: {"index.html":"<!doctype html>...","app.js":"..."}`;
+export interface GovernedGenerationTransport {
+  generate(input: { model: string; systemPrompt: string; userContent: string }): Promise<{ content: string; tokensUsed?: number }>;
+}
+
+const DEFAULT_MODEL = 'configured-plugin-model';
+const SYSTEM_PROMPT = 'You are a code generator. Return ONLY a JSON object mapping filenames to file contents. No markdown, no explanation, and no code fences.';
 
 export class SandboxOrchestrator {
-  static async generate(request: OrchestratorRequest): Promise<OrchestratorResponse> {
+  static async generate(request: OrchestratorRequest, transport?: GovernedGenerationTransport): Promise<OrchestratorResponse> {
+    if (!transport) {
+      return { files: {}, tokensUsed: 0, success: false, error: 'A Tier-0-approved OmniRouter transport is required for code generation.' };
+    }
     const model = request.model || DEFAULT_MODEL;
-    const existing = request.existingFiles
-      ? `\n\nExisting files:\n${JSON.stringify(request.existingFiles, null, 0).slice(0, 2000)}`
-      : '';
-
-    const userContent = `${request.prompt}${existing}`;
-
+    const existing = request.existingFiles ? `\n\nExisting files:\n${JSON.stringify(request.existingFiles).slice(0, 2000)}` : '';
     try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${request.groqApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userContent },
-          ],
-          max_tokens: MAX_TOKENS,
-          temperature: 0.2,
-          stream: false,
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        return { files: {}, tokensUsed: 0, success: false, error: `Groq API error: ${errText}` };
-      }
-
-      const data = await res.json() as any;
-      const usage = data.usage?.total_tokens ?? 0;
-      const content = data.choices?.[0]?.message?.content ?? '';
-
-      const files = this.parseFileMap(content);
-      return { files, tokensUsed: usage, success: true };
-    } catch (err: any) {
-      return { files: {}, tokensUsed: 0, success: false, error: err.message || String(err) };
+      const response = await transport.generate({ model, systemPrompt: SYSTEM_PROMPT, userContent: `${request.prompt}${existing}` });
+      return { files: this.parseFileMap(response.content), tokensUsed: response.tokensUsed || 0, success: true };
+    } catch (error) {
+      return { files: {}, tokensUsed: 0, success: false, error: (error as Error).message };
     }
   }
 
   static parseFileMap(raw: string): FileMap {
-    let cleaned = raw.trim();
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replace(/^```(?:json)?\n?/, '').replace(/```$/, '').trim();
-    }
+    const cleaned = raw.trim().replace(/^```(?:json)?\n?/, '').replace(/```$/, '').trim();
     try {
       const parsed = JSON.parse(cleaned);
-      if (typeof parsed === 'object' && parsed !== null) {
-        const fileMap: FileMap = {};
-        for (const [k, v] of Object.entries(parsed)) {
-          if (typeof v === 'string') fileMap[k] = v;
-        }
-        return fileMap;
-      }
+      if (typeof parsed !== 'object' || parsed === null) return {};
+      return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
     } catch {
-      // fall through
+      return {};
     }
-    return {};
   }
 
   static mergeFiles(existing: FileMap, generated: FileMap): FileMap {

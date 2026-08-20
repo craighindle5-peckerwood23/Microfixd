@@ -15,3 +15,7 @@ coverage/
 .DS_Store
 *.log
 
+.microfixd/
+artifacts-*.png
+.data/
+data/
