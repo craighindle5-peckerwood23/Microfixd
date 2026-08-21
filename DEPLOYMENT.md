@@ -17,6 +17,21 @@ Microfixd ships as one Docker image and one Node entrypoint: `node dist/server.c
 | `MICROFIXD_DEFAULT_TENANT` | Default tenant for internal compatibility paths. | Keep `global`; all customer work should submit an explicit tenant identifier. |
 | `NVIDIA_VISIBLE_DEVICES` | Optional platform-provided GPU discovery signal. | Read-only discovery only; it does not enable GPU workload execution or billing. |
 
+## Supabase Session Pooler for Microfixd
+
+For a persistent Microfixd Node container running from an IPv4-only network, use Supabase’s **Shared Pooler in Session mode**. In the Supabase dashboard, open the target project, select **Connect**, choose **Session Pooler**, and copy the single PostgreSQL URI shown there. Store that complete URI in the deployment platform’s secret manager as `SUPABASE_DB_URL`; do not put it in Git, source, browser configuration, screenshots, logs, or an uploaded archive. Supabase documents Session Pooler as the IPv4-compatible option for persistent application backends; the direct database endpoint is IPv6 unless the project has the IPv4 add-on. [4]
+
+For local development only, create an ignored `.env.local` file beside `.env.example` and add exactly one private setting:
+
+```bash
+SUPABASE_DB_URL='<paste-the-complete-session-pooler-uri-here>'
+REQUIRE_DURABLE_MEMORY=true
+```
+
+Use the URI exactly as copied, retain the SSL query settings Supabase provides, and percent-encode special characters in the password. The runtime accepts `DATABASE_URL` as an equivalent portable alternative, but configure **one** of the two variables only. At deployment time, `GET /readyz` is production-ready only when it returns HTTP 200 with `storage.durable: true`; a JSON fallback or a failed ready check is not production-ready.
+
+> Do not use a Supabase project URL or public/anon key for `SUPABASE_DB_URL`. Those are Data API credentials, not the PostgreSQL connection URI required by Microfixd’s durable runtime store.
+
 ## Railway
 
 Railway detects a root `Dockerfile` and its configuration-as-code file. The included `railway.toml` explicitly selects the Dockerfile builder and makes deployment activation depend on the durable-memory readiness endpoint. Railway injects `PORT`, and its health checks use the same port, so Microfixd’s port-injection procedure is mandatory. [1] [2] [3]
@@ -73,3 +88,4 @@ The active `microfyxd` project contains the additive `microfixd_*` tables create
 [1]: https://docs.railway.com/config-as-code/reference "Railway Config as Code Reference"
 [2]: https://docs.railway.com/deployments/healthchecks "Railway Healthchecks"
 [3]: https://docs.railway.com/builds/dockerfiles "Railway Dockerfiles"
+[4]: https://supabase.com/docs/guides/database/connecting-to-postgres "Supabase: Connect to your Postgres database"
