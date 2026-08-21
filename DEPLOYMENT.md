@@ -46,6 +46,19 @@ Create a Railway service from this repository, set the required production setti
 | Health-check timeout | 300 seconds |
 | Restart policy | `ON_FAILURE`, maximum 5 retries |
 
+## Render
+
+The root `render.yaml` is a Render Blueprint for the same Docker image used by Railway. In Render, select **New → Blueprint**, connect the Microfixd repository, and review the generated `microfixd-governed` web service. Render builds the root `Dockerfile`, supplies its own `PORT`, and waits for `GET /readyz` before treating the service as healthy. [5] [6]
+
+When Render prompts for values marked as secrets, enter the following only in the Render dashboard:
+
+| Render variable | Required value |
+|---|---|
+| `ADMIN_API_KEY` | A new long random operator secret. |
+| `SUPABASE_DB_URL` | The single Supabase **Session Pooler** PostgreSQL URI. |
+
+The Blueprint fixes `REQUIRE_DURABLE_MEMORY=true`; therefore the deployment will not become healthy until the Session Pooler connection works and durable storage reports true. Do not create a Render Postgres database or attach an application disk for the Microfixd system of record: the external Supabase project remains the durable authority. The Dockerfile’s own `CMD` starts the service, so no custom Docker command is required.
+
 ## GitHub Codespaces
 
 The checked-in `.devcontainer/devcontainer.json` uses Node 22, forwards port 3000, and defaults durable-memory enforcement to `false` so a developer can run the system against the JSON fallback without copying production data. Add development-only values through Codespaces secrets or environment settings, then run `npm run dev`.
@@ -89,3 +102,5 @@ The active `microfyxd` project contains the additive `microfixd_*` tables create
 [2]: https://docs.railway.com/deployments/healthchecks "Railway Healthchecks"
 [3]: https://docs.railway.com/builds/dockerfiles "Railway Dockerfiles"
 [4]: https://supabase.com/docs/guides/database/connecting-to-postgres "Supabase: Connect to your Postgres database"
+[5]: https://render.com/docs/blueprint-spec "Render Blueprint YAML Reference"
+[6]: https://render.com/docs/docker "Render Docker Deployments"
