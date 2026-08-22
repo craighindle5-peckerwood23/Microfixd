@@ -1,4 +1,4 @@
-import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Health = { status: string; service?: string; tier0?: string; uptimeSeconds?: number; storage?: { durable: boolean; storage: string }; reason?: string };
 type Run = { id: string; tenantId: string; status: string; currentStep: number; outcome?: string; error?: string; workingMemory?: Record<string, unknown> };
@@ -45,6 +45,8 @@ export default function OperationsConsole() {
   const [agentId, setAgentId] = useState('microfixd-primary');
   const [message, setMessage] = useState('Enter an operations key to unlock tenant-scoped mission control.');
   const [busy, setBusy] = useState(false);
+  const [arcanaSpeaking, setArcanaSpeaking] = useState(false);
+  const arcanaAudio = useRef<HTMLAudioElement | null>(null);
 
   const refreshHealth = useCallback(async () => {
     try {
@@ -95,6 +97,12 @@ export default function OperationsConsole() {
 
   useEffect(() => { void refreshHealth(); }, [refreshHealth]);
   useEffect(() => { void refreshMission(); }, [refreshMission]);
+  useEffect(() => () => {
+    if (!arcanaAudio.current) return;
+    arcanaAudio.current.pause();
+    arcanaAudio.current.src = '';
+    arcanaAudio.current = null;
+  }, []);
 
   const submitGoal = async (event: FormEvent) => {
     event.preventDefault();
@@ -144,6 +152,31 @@ export default function OperationsConsole() {
     } catch (error) { setMessage((error as Error).message); } finally { setBusy(false); }
   };
 
+  const playArcanaIntroduction = async () => {
+    try {
+      let audio = arcanaAudio.current;
+      if (!audio) {
+        audio = new Audio('/audio/arcana-introduction.wav');
+        audio.preload = 'auto';
+        audio.volume = 0.84;
+        audio.addEventListener('ended', () => setArcanaSpeaking(false));
+        audio.addEventListener('pause', () => setArcanaSpeaking(false));
+        audio.addEventListener('error', () => {
+          setArcanaSpeaking(false);
+          setMessage('Arcana’s local voice asset is unavailable. Rebuild the client bundle and try again.');
+        });
+        arcanaAudio.current = audio;
+      }
+      audio.currentTime = 0;
+      setArcanaSpeaking(true);
+      await audio.play();
+      setMessage('Arcana voice introduction playing locally. No provider request or credential is used.');
+    } catch (error) {
+      setArcanaSpeaking(false);
+      setMessage(`Browser audio requires a direct click to play: ${(error as Error).message}`);
+    }
+  };
+
   const runDiagnostics = async () => {
     if (!key) return setMessage('Enter the operations key before running read-only automotive diagnostics.');
     try {
@@ -170,6 +203,7 @@ export default function OperationsConsole() {
       <section className="holo-core" aria-label="Holographic humanoid mission-control representation">
         <div className="orbit orbit-one"><span>ORGANS</span></div><div className="orbit orbit-two"><span>AGENTS</span></div><div className="orbit orbit-three"><span>TENANTS</span></div>
         <div className="holographic-head"><div className="head-halo"/><div className="head-crown"/><div className="head-face"><i/><i/><b/></div><div className="head-neck"/></div>
+        <div className="arcana-voice-control"><span>ARCANA / VOICE LINK</span><button className="arcana-button" type="button" onClick={() => void playArcanaIntroduction()} aria-pressed={arcanaSpeaking}>{arcanaSpeaking ? 'Arcana speaking…' : 'Hear Arcana introduction'}</button><small>User-triggered local audio · no provider route</small></div>
         <div className="core-label"><b>PARAGON</b><span>TIER‑0 AUTHORITY</span><small>{safeModeOn ? 'SAFE MODE / INSPECTION ONLY' : 'BOUNDARY-CONTROLLED AUTONOMY'}</small></div>
       </section>
 
