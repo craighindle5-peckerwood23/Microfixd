@@ -14,3 +14,9 @@ dist/
 coverage/
 .DS_Store
 *.log
+
+.microfixd/
+artifacts-*.png
+.data/
+data/
+level6-mission-control.png
